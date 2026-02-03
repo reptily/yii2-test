@@ -2,10 +2,14 @@
 
 namespace app\controllers;
 
+use app\dto\BookDto;
+use app\dto\SubscriptionDto;
 use app\models\Author;
 use app\models\Book;
 use app\models\Subscription;
 use app\repositories\BookRepository;
+use app\services\BookService;
+use app\services\SubscriptionService;
 use Yii;
 use yii\filters\AccessControl;
 use yii\filters\VerbFilter;
@@ -75,79 +79,70 @@ class BookController extends Controller
     public function actionCreate()
     {
         $model = new Book();
+        $postData = Yii::$app->request->post('Book');
 
-        if ($this->request->isPost) {
-            if ($model->load($this->request->post())) {
-                $model->imageFile = UploadedFile::getInstance($model, 'imageFile');
+        if ($this->request->isPost && $postData) {
+            $dto = new BookDto(
+                title: $postData['title'] ?? '',
+                year: (int)($postData['year'] ?? 0),
+                description: $postData['description'] ?? null,
+                isbn: $postData['isbn'] ?? null,
+                authorIds: $postData['authorIds'] ?? [],
+                imageFile: UploadedFile::getInstance($model, 'imageFile')
+            );
 
-                if ($model->imageFile) {
-                    $fileName = time() . '_' . $model->imageFile->baseName . '.' . $model->imageFile->extension;
-                    if ($model->imageFile->saveAs('uploads/' . $fileName)) {
-                        $model->image = $fileName;
-                    }
-                }
-
-                if ($model->save()) {
-                    Yii::$app->session->setFlash('success', "Книга '{$model->title}' успешно добавлена!");
-                    return $this->redirect(['view', 'id' => $model->id]);
-                }
+            if ((new BookService())->save($model, $dto)) {
+                Yii::$app->session->setFlash('success', "Книга '{$model->title}' добавлена.");
+                return $this->redirect(['view', 'id' => $model->id]);
             }
-        } else {
-            $model->loadDefaultValues();
         }
-
-        $authors = ArrayHelper::map(Author::find()->all(), 'id', 'full_name');
 
         return $this->render('create', [
             'model' => $model,
-            'authors' => $authors,
+            'authors' => ArrayHelper::map(Author::find()->all(), 'id', 'full_name'),
         ]);
     }
 
     public function actionUpdate($id)
     {
         $model = $this->findModel($id);
+        $postData = Yii::$app->request->post('Book');
 
-        $model->authorIds = ArrayHelper::getColumn($model->authors, 'id');
+        if ($this->request->isPost && $postData) {
+            $dto = new BookDto(
+                title: $postData['title'] ?? '',
+                year: (int)($postData['year'] ?? 0),
+                description: $postData['description'] ?? null,
+                isbn: $postData['isbn'] ?? null,
+                authorIds: $postData['authorIds'] ?? [],
+                imageFile: UploadedFile::getInstance($model, 'imageFile')
+            );
 
-        if ($model->load($this->request->post())) {
-            $model->imageFile = UploadedFile::getInstance($model, 'imageFile');
-
-            if ($model->imageFile) {
-                $path = Yii::getAlias('@webroot/uploads/');
-                $fileName = time() . '_' . $model->imageFile->baseName . '.' . $model->imageFile->extension;
-                if ($model->imageFile->saveAs($path . $fileName)) {
-                    $model->image = $fileName;
-                }
-            }
-
-            if ($model->save()) {
+            if ((new BookService())->save($model, $dto)) {
+                Yii::$app->session->setFlash('success', "Изменения сохранены.");
                 return $this->redirect(['view', 'id' => $model->id]);
             }
         }
 
-        $authors = ArrayHelper::map(Author::find()->all(), 'id', 'full_name');
+        $model->authorIds = ArrayHelper::getColumn($model->authors, 'id');
 
         return $this->render('update', [
             'model' => $model,
-            'authors' => $authors,
+            'authors' => ArrayHelper::map(Author::find()->all(), 'id', 'full_name'),
         ]);
     }
+
 
     public function actionDelete($id)
     {
         $model = $this->findModel($id);
+        $service = new BookService();
 
-        if ($model->image) {
-            $filePath = Yii::getAlias('@webroot/uploads/') . $model->image;
-            if (file_exists($filePath)) {
-                unlink($filePath);
-            }
+        if ($service->delete($model)) {
+            Yii::$app->session->setFlash('success', 'Книга и обложка успешно удалены.');
+        } else {
+            Yii::$app->session->setFlash('error', 'Ошибка при удалении книги.');
         }
-
-        $model->delete();
-
-        Yii::$app->session->setFlash('success', 'Книга успешно удалена.');
 
         return $this->redirect(['index']);
     }
@@ -156,17 +151,23 @@ class BookController extends Controller
     {
         $author = Author::findOne($author_id);
 
-
         if (!$author) {
             throw new NotFoundHttpException("Автор не найден");
         }
 
-        $model = new Subscription();
-        $model->author_id = $author_id;
+        $model = new Subscription(['author_id' => $author_id]);
+        $postData = Yii::$app->request->post('Subscription');
 
-        if ($model->load(Yii::$app->request->post()) && $model->save()) {
-            Yii::$app->session->setFlash('success', "Вы подписались на автора: {$author->full_name}");
-            return $this->redirect(['index']);
+        if (Yii::$app->request->isPost && $postData) {
+            $dto = new SubscriptionDto(
+                authorId: (int)($postData['author_id'] ?? $author_id),
+                phone: (string)($postData['phone'] ?? ''),
+            );
+
+            if ((new SubscriptionService())->subscribe($model, $dto)) {
+                Yii::$app->session->setFlash('success', "Вы подписались на: {$author->full_name}");
+                return $this->redirect(['index']);
+            }
         }
 
         return $this->render('subscribe', [
